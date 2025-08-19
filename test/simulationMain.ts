@@ -154,6 +154,14 @@ async function runInExtensionHost() {
 	const vscode: typeof vscodeType = require('vscode');
 	const folder = vscode.workspace.workspaceFolders![0];
 
+
+
+	// Set chat.tools.autoApprove to true in global settings.
+	await updateChatToolsConfig(vscode);
+
+	await activateExtension(vscode, 'ms-python.python');
+	await activateExtension(vscode, 'ms-python.vscode-pylance');
+
 	Cache.Instance.on('deviceCodeCallback', (url: string) => {
 		rpc.callMethod('deviceCodeCallback', { url });
 	});
@@ -193,6 +201,100 @@ async function runInExtensionHost() {
 			resolve();
 		});
 	});
+}
+
+async function updateChatToolsConfig(vscode: typeof vscodeType): Promise<void> {
+	try {
+		const chatToolsConfig = vscode.workspace.getConfiguration('chat.tools');
+		const currentValue = chatToolsConfig.get<boolean>('autoApprove');
+
+		if (currentValue !== true) {
+			await chatToolsConfig.update('autoApprove', true, vscode.ConfigurationTarget.Global);
+			logger.info('Updated chat.tools.autoApprove to true');
+		} else {
+			logger.info('chat.tools.autoApprove already set to true');
+		}
+
+		const autoApproveValue = vscode.workspace.getConfiguration('chat.tools').get('autoApprove');
+		logger.info(`chat.tools.autoApprove is set to: ${autoApproveValue}`);
+	}
+	catch (error) {
+		logger.info(`Failed to update chat.tools.autoApprove: ${error}`);
+	}
+}
+
+async function waitForExtension(vscode: typeof vscodeType, id: string, timeoutMs = 120_000): Promise<vscodeType.Extension<any> | undefined> {
+	let ext = vscode.extensions.getExtension(id);
+	if (ext) { return ext; }
+
+	return new Promise(resolve => {
+		const timer = setTimeout(() => {
+			dispose();
+			resolve(undefined);
+		}, timeoutMs);
+
+		const sub = vscode.extensions.onDidChange(() => {
+			ext = vscode.extensions.getExtension(id);
+			if (ext) {
+				clearTimeout(timer);
+				dispose();
+				resolve(ext);
+			}
+		});
+
+		function dispose() { try { sub.dispose(); } catch { /* noop */ } }
+	});
+}
+
+async function activateExtension(vscode: typeof vscodeType, extensionName: string): Promise<void> {
+	try {
+		const extension = await waitForExtension(vscode, extensionName, 180_000); // up to 3 minutes
+		if (!extension) {
+			logger.warn(`Extension ${extensionName} did not appear within the timeout. Ensure it is installed via --install-extension or extensionDependencies.`);
+		} else if (!extension.isActive) {
+			logger.info(`Activating ${extensionName}…`);
+			await extension.activate();
+			if (extension.isActive) {
+				logger.info(`${extensionName} activated successfully.`);
+			} else {
+				logger.warn(`${extensionName} failed to activate.`);
+			}
+		} else {
+			logger.info(`${extensionName} already active.`);
+		}
+
+		// Below code is specific to Pylance MCP tools, it's used to get extra logging info
+		// and needs to be run with the custom pylance vsix that has MCP apis.
+		// Build vsix from https://github.com/microsoft/pyrx/pull/7026
+
+		// logger.info('Waiting 5 seconds for Pylance MCP server to start and tools to be discovered...');
+		// await new Promise(resolve => setTimeout(resolve, 5000));
+
+		// if (extension && extension.isActive) {
+		// 	const api = extension.exports;
+
+		// 	// Check if MCP API is available and get status
+		// 	if (api.mcp) {
+		// 		const mcpStatus = await api.mcp.getStatus();
+		// 		logger.info('MCP Server Status:', mcpStatus);
+		// 		logger.info('- Is Active:', mcpStatus.isActive);
+		// 		logger.info('- Port:', mcpStatus.port || 'N/A');
+		// 		logger.info('- Active Connections:', mcpStatus.activeConnections);
+		// 		logger.info('- Last Started:', mcpStatus.lastStarted || 'Never');
+		// 	} else {
+		// 		logger.info('MCP API is not available');
+		// 	}
+
+		// 	// Check what VS Code tools are now available
+		// 	const allVSCodeTools = vscode.lm.tools;
+		// 	logger.info(`Available VS Code tools after waiting: ${allVSCodeTools.length}`);
+		// 	for (const tool of allVSCodeTools) {
+		// 		logger.info(`- Tool: ${tool.name} - ${tool.description}`);
+		// 	}
+		// }
+	} catch (e: any) {
+		logger.warn(`Failed to activate ${extensionName}: ${e?.message ?? String(e)} `);
+	}
 }
 
 async function prepareTestEnvironment(opts: SimulationOptions, jsonOutputPrinter: IJSONOutputPrinter, rpcInExtensionHost?: SimpleRPC) {
