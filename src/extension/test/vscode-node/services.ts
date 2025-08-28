@@ -75,7 +75,6 @@ import { ITestProvider } from '../../../platform/testing/common/testProvider';
 import { IWorkspaceMutationManager } from '../../../platform/testing/common/workspaceMutationManager';
 import { ISetupTestsDetector, NullSetupTestsDetector } from '../../../platform/testing/node/setupTestDetector';
 import { TestProvider } from '../../../platform/testing/vscode/testProviderImpl';
-import { IThinkingDataService, ThinkingDataImpl } from '../../../platform/thinking/node/thinkingDataService';
 import { ITokenizerProvider, TokenizerProvider } from '../../../platform/tokenizer/node/tokenizer';
 import { IWorkspaceService } from '../../../platform/workspace/common/workspaceService';
 import { ExtensionTextDocumentManager } from '../../../platform/workspace/vscode/workspaceServiceImpl';
@@ -94,6 +93,7 @@ import { LaunchConfigService } from '../../onboardDebug/vscode/launchConfigServi
 import { ChatMLFetcherImpl } from '../../prompt/node/chatMLFetcher';
 import { IFeedbackReporter, NullFeedbackReporterImpl } from '../../prompt/node/feedbackReporter';
 import { IPromptVariablesService } from '../../prompt/node/promptVariablesService';
+import { ITodoListContextProvider, TodoListContextProvider } from '../../prompt/node/todoListContextProvider';
 import { GitDiffService } from '../../prompt/vscode-node/gitDiffService';
 import { PromptVariablesServiceImpl } from '../../prompt/vscode-node/promptVariablesService';
 import { CodeMapperService, ICodeMapperService } from '../../prompts/node/codeMapper/codeMapperService';
@@ -170,11 +170,11 @@ export function createExtensionTestingServices(): TestingServiceCollection {
 	testingServiceCollection.define(IToolsService, new SyncDescriptor(NullToolsService));
 	testingServiceCollection.define(IChatSessionService, new SyncDescriptor(TestChatSessionService));
 	testingServiceCollection.define(INotebookService, new SyncDescriptor(SimulationNotebookService));
-	testingServiceCollection.define(IThinkingDataService, new SyncDescriptor(ThinkingDataImpl));
 	testingServiceCollection.define(IRunCommandExecutionService, new SyncDescriptor(MockRunCommandExecutionService));
 	testingServiceCollection.define(ISearchService, new SyncDescriptor(SearchServiceImpl));
 	testingServiceCollection.define(IToolGroupingCache, new SyncDescriptor(ToolGroupingCache));
 	testingServiceCollection.define(IToolGroupingService, new SyncDescriptor(ToolGroupingService));
+	testingServiceCollection.define(ITodoListContextProvider, new SyncDescriptor(TodoListContextProvider));
 
 	return testingServiceCollection;
 }

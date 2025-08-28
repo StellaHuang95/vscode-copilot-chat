@@ -32,9 +32,8 @@ export class AutoChatEndpoint implements IChatEndpoint {
 	supportsVision: boolean = this._wrappedEndpoint.supportsVision;
 	supportsPrediction: boolean = this._wrappedEndpoint.supportsPrediction;
 	showInModelPicker: boolean = true;
-	supportsStatefulResponses: boolean = this._wrappedEndpoint.supportsStatefulResponses;
 	isPremium?: boolean | undefined = this._wrappedEndpoint.isPremium;
-	multiplier?: number | undefined = this._wrappedEndpoint.multiplier;
+	public readonly multiplier?: number | undefined;
 	restrictedToSkus?: string[] | undefined = this._wrappedEndpoint.restrictedToSkus;
 	isDefault: boolean = this._wrappedEndpoint.isDefault;
 	isFallback: boolean = this._wrappedEndpoint.isFallback;
@@ -48,8 +47,13 @@ export class AutoChatEndpoint implements IChatEndpoint {
 
 	constructor(
 		private readonly _wrappedEndpoint: IChatEndpoint,
-		private readonly _sessionToken: string
-	) { }
+		private readonly _sessionToken: string,
+		private readonly _discountPercent: number
+	) {
+		// Calculate the multiplier including the discount percent, rounding to two decimal places
+		const baseMultiplier = this._wrappedEndpoint.multiplier ?? 1;
+		this.multiplier = Math.round(baseMultiplier * (1 - this._discountPercent) * 100) / 100;
+	}
 
 	getExtraHeaders(): Record<string, string> {
 		return {
@@ -100,5 +104,5 @@ export class AutoChatEndpoint implements IChatEndpoint {
  * @returns True if the auto mode is enabled, false otherwise
  */
 export function isAutoModeEnabled(expService: IExperimentationService, envService: IEnvService): boolean {
-	return !!expService.getTreatmentVariable<boolean>('vscode', 'copilotchatcapiautomode') || envService.isPreRelease();
+	return !!expService.getTreatmentVariable<boolean>('copilotchatcapiautomode') || envService.isPreRelease();
 }

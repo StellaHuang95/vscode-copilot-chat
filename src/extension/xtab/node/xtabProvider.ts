@@ -13,7 +13,9 @@ import { createProxyXtabEndpoint } from '../../../platform/endpoint/node/proxyXt
 import { IIgnoreService } from '../../../platform/ignore/common/ignoreService';
 import { Copilot } from '../../../platform/inlineCompletions/common/api';
 import { LanguageContextEntry, LanguageContextResponse } from '../../../platform/inlineEdits/common/dataTypes/languageContext';
+import { LanguageId } from '../../../platform/inlineEdits/common/dataTypes/languageId';
 import * as xtabPromptOptions from '../../../platform/inlineEdits/common/dataTypes/xtabPromptOptions';
+import { LanguageContextLanguages, LanguageContextOptions } from '../../../platform/inlineEdits/common/dataTypes/xtabPromptOptions';
 import { InlineEditRequestLogContext } from '../../../platform/inlineEdits/common/inlineEditLogContext';
 import { ResponseProcessor } from '../../../platform/inlineEdits/common/responseProcessor';
 import { NoNextEditReason, PushEdit, ShowNextEditPreference, StatelessNextEditDocument, StatelessNextEditRequest, StatelessNextEditResult, StatelessNextEditTelemetryBuilder } from '../../../platform/inlineEdits/common/statelessNextEditProvider';
@@ -27,10 +29,11 @@ import { IChatEndpoint } from '../../../platform/networking/common/networking';
 import { ISimulationTestContext } from '../../../platform/simulationTestContext/common/simulationTestContext';
 import { IExperimentationService } from '../../../platform/telemetry/common/nullExperimentationService';
 import { IWorkspaceService } from '../../../platform/workspace/common/workspaceService';
+import { raceFilter } from '../../../util/common/async';
 import * as errors from '../../../util/common/errors';
 import { Result } from '../../../util/common/result';
 import { createTracer, ITracer } from '../../../util/common/tracing';
-import { AsyncIterableObject, DeferredPromise, raceFilter, raceTimeout, timeout } from '../../../util/vs/base/common/async';
+import { AsyncIterableObject, DeferredPromise, raceTimeout, timeout } from '../../../util/vs/base/common/async';
 import { CancellationToken } from '../../../util/vs/base/common/cancellation';
 import { StopWatch } from '../../../util/vs/base/common/stopwatch';
 import { LineEdit, LineReplacement } from '../../../util/vs/editor/common/core/edits/lineEdit';
@@ -184,7 +187,7 @@ export class XtabProvider extends ChainedStatelessNextEditProvider {
 
 		const areaAroundEditWindowLinesRange = this.computeAreaAroundEditWindowLinesRange(currentFileContentLines, cursorLineIdx);
 
-		const editWindowLinesRange = this.computeEditWindowLinesRange(currentFileContentLines, cursorLineIdx, retryState);
+		const editWindowLinesRange = this.computeEditWindowLinesRange(currentFileContentLines, cursorLineIdx, request, retryState);
 
 		const cursorOriginalLinesOffset = Math.max(0, cursorLineIdx - editWindowLinesRange.start);
 		const editWindowLastLineLength = activeDocument.documentAfterEdits.getTransformer().getLineLength(editWindowLinesRange.endExclusive);
@@ -240,10 +243,11 @@ export class XtabProvider extends ChainedStatelessNextEditProvider {
 					maxTokens: this.configService.getExperimentBasedConfig(ConfigKey.Internal.InlineEditsXtabRecentlyViewedDocumentsMaxTokens, this.expService),
 					includeViewedFiles: this.configService.getExperimentBasedConfig(ConfigKey.Internal.InlineEditsXtabIncludeViewedFiles, this.expService),
 				},
-				languageContext: {
+				languageContext: this.determineLanguageContextOptions(activeDocument.languageId, {
 					enabled: this.configService.getExperimentBasedConfig(ConfigKey.Internal.InlineEditsXtabLanguageContextEnabled, this.expService),
+					enabledLanguages: this.configService.getConfig(ConfigKey.Internal.InlineEditsXtabLanguageContextEnabledLanguages),
 					maxTokens: this.configService.getExperimentBasedConfig(ConfigKey.Internal.InlineEditsXtabLanguageContextMaxTokens, this.expService),
-				},
+				}),
 				diffHistory: {
 					nEntries: this.configService.getExperimentBasedConfig(ConfigKey.Internal.InlineEditsXtabDiffNEntries, this.expService),
 					maxTokens: this.configService.getExperimentBasedConfig(ConfigKey.Internal.InlineEditsXtabDiffMaxTokens, this.expService),
@@ -363,6 +367,7 @@ export class XtabProvider extends ChainedStatelessNextEditProvider {
 			const cursorPositionVscode = new VscodePosition(cursorPosition.lineNumber - 1, cursorPosition.column - 1);
 
 			const ctxRequest: Copilot.ResolveRequest = {
+				opportunityId: request.opportunityId,
 				completionId: request.id,
 				documentContext: {
 					uri: textDoc.uri.toString(),
@@ -731,7 +736,7 @@ export class XtabProvider extends ChainedStatelessNextEditProvider {
 		const allowRetryWithExpandedWindow = this.configService.getExperimentBasedConfig(ConfigKey.Internal.InlineEditsXtabProviderRetryWithNMoreLinesBelow, this.expService);
 
 		// if allowed to retry and not retrying already, flip the retry state and try again
-		if (allowRetryWithExpandedWindow && retryState === RetryState.NotRetrying) {
+		if (allowRetryWithExpandedWindow && retryState === RetryState.NotRetrying && request.expandedEditWindowNLines === undefined) {
 			this.doGetNextEdit(request, pushEdit, delaySession, logContext, cancellationToken, telemetryBuilder, RetryState.RetryingWithExpandedWindow);
 			return;
 		}
@@ -747,7 +752,7 @@ export class XtabProvider extends ChainedStatelessNextEditProvider {
 		return new OffsetRange(areaAroundStart, areaAroundEndExcl);
 	}
 
-	private computeEditWindowLinesRange(currentDocLines: string[], cursorLine: number, retryState: RetryState): OffsetRange {
+	private computeEditWindowLinesRange(currentDocLines: string[], cursorLine: number, request: StatelessNextEditRequest, retryState: RetryState): OffsetRange {
 		let nLinesAbove: number;
 		{
 			const useVaryingLinesAbove = this.configService.getExperimentBasedConfig(ConfigKey.Internal.InlineEditsXtabProviderUseVaryingLinesAbove, this.expService);
@@ -771,8 +776,21 @@ export class XtabProvider extends ChainedStatelessNextEditProvider {
 			}
 		}
 
-		let nLinesBelow = (this.configService.getExperimentBasedConfig(ConfigKey.Internal.InlineEditsXtabProviderNLinesBelow, this.expService)
-			?? N_LINES_BELOW);
+		let nLinesBelow;
+
+		if (request.expandedEditWindowNLines !== undefined) {
+			this.tracer.trace(`Using expanded nLinesBelow: ${request.expandedEditWindowNLines}`);
+			nLinesBelow = request.expandedEditWindowNLines;
+		} else {
+			const overriddenNLinesBelow = this.configService.getExperimentBasedConfig(ConfigKey.Internal.InlineEditsXtabProviderNLinesBelow, this.expService);
+			if (overriddenNLinesBelow !== undefined) {
+				this.tracer.trace(`Using overridden nLinesBelow: ${overriddenNLinesBelow}`);
+				nLinesBelow = overriddenNLinesBelow;
+			} else {
+				this.tracer.trace(`Using default nLinesBelow: ${N_LINES_BELOW}`);
+				nLinesBelow = N_LINES_BELOW; // default
+			}
+		}
 
 		if (retryState === RetryState.RetryingWithExpandedWindow) {
 			nLinesBelow += this.configService.getExperimentBasedConfig(ConfigKey.Internal.InlineEditsXtabProviderRetryWithNMoreLinesBelow, this.expService) ?? 0;
@@ -845,6 +863,15 @@ export class XtabProvider extends ChainedStatelessNextEditProvider {
 			default:
 				return systemPromptTemplate;
 		}
+	}
+
+	private determineLanguageContextOptions(languageId: LanguageId, { enabled, enabledLanguages, maxTokens }: { enabled: boolean; enabledLanguages: LanguageContextLanguages; maxTokens: number }): LanguageContextOptions {
+		// Some languages are
+		if (languageId in enabledLanguages) {
+			return { enabled: enabledLanguages[languageId], maxTokens };
+		}
+
+		return { enabled, maxTokens };
 	}
 
 	private getEndpoint() {

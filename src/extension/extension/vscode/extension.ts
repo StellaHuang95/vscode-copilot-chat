@@ -66,8 +66,7 @@ export async function baseActivate(configuration: IExtensionActivationConfigurat
 
 		// Await intialization of exp service. This ensure cache is fresh.
 		// It will then auto refresh every 30 minutes after that.
-		await expService.initializePromise;
-		await expService.initialFetch;
+		await expService.hasTreatments();
 
 		// THIS is awaited because some contributions can block activation
 		// via `IExtensionContribution#activationBlocker`
@@ -76,7 +75,7 @@ export async function baseActivate(configuration: IExtensionActivationConfigurat
 		await contributions.waitForActivationBlockers();
 	});
 
-	if (ExtensionMode.Test === context.extensionMode) {
+	if (ExtensionMode.Test === context.extensionMode && !isScenarioAutomation) {
 		return instantiationService; // The returned accessor is used in tests
 	}
 

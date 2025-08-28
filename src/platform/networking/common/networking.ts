@@ -20,7 +20,7 @@ import { ITelemetryService, TelemetryProperties } from '../../telemetry/common/t
 import { TelemetryData } from '../../telemetry/common/telemetryData';
 import { FinishedCallback, OpenAiFunctionTool, OpenAiResponsesFunctionTool, OptionalChatRequestParams } from './fetch';
 import { FetchOptions, IAbortController, IFetcherService, Response } from './fetcherService';
-import { ChatCompletion, rawMessageToCAPI } from './openai';
+import { ChatCompletion, RawMessageConversionCallback, rawMessageToCAPI } from './openai';
 
 /**
  * Encapsulates all the functionality related to making GET/POST requests using
@@ -95,9 +95,12 @@ export interface IEndpointBody {
 	similarity?: number;
 	/** Code search: */
 	scoping_query?: string;
+
 	/** Responses API: */
 	input?: readonly any[];
 	truncation?: 'auto' | 'disabled';
+	include?: ['reasoning.encrypted_content'];
+	store?: boolean;
 }
 
 export interface IEndpoint {
@@ -151,10 +154,10 @@ export interface IChatEndpoint extends IEndpoint {
 	readonly maxOutputTokens: number;
 	/** The model ID- this may change and will be `copilot-base` for the base model. Use `family` to switch behavior based on model type. */
 	readonly model: string;
+	readonly apiType?: string;
 	readonly supportsToolCalls: boolean;
 	readonly supportsVision: boolean;
 	readonly supportsPrediction: boolean;
-	readonly supportsStatefulResponses: boolean;
 	readonly showInModelPicker: boolean;
 	readonly isPremium?: boolean;
 	readonly multiplier?: number;
@@ -224,13 +227,13 @@ export interface IChatEndpoint extends IEndpoint {
 }
 
 /** Function to create a standard request body for CAPI completions */
-export function createCapiRequestBody(model: string, options: ICreateEndpointBodyOptions) {
+export function createCapiRequestBody(options: ICreateEndpointBodyOptions, model: string, callback?: RawMessageConversionCallback) {
 	// FIXME@ulugbekna: need to investigate why language configs have such stop words, eg
 	// python has `\ndef` and `\nclass` which must be stop words for ghost text
 	// const stops = getLanguageConfig<string[]>(accessor, ConfigKey.Stops);
 
 	const request: IEndpointBody = {
-		messages: rawMessageToCAPI(options.messages),
+		messages: rawMessageToCAPI(options.messages, callback),
 		model,
 		// stop: stops,
 	};

@@ -14,7 +14,7 @@ import { IEnvService } from '../../env/common/envService';
 import { BaseOctoKitService, VSCodeTeamId } from '../../github/common/githubService';
 import { NullBaseOctoKitService } from '../../github/common/nullOctokitServiceImpl';
 import { ILogService } from '../../log/common/logService';
-import { IFetcherService, Response, jsonVerboseError } from '../../networking/common/fetcherService';
+import { FetchOptions, IFetcherService, Response, jsonVerboseError } from '../../networking/common/fetcherService';
 import { ITelemetryService } from '../../telemetry/common/telemetry';
 import { TelemetryData } from '../../telemetry/common/telemetryData';
 import { CopilotToken, CopilotUserInfo, ExtendedTokenInfo, TokenInfo, TokenInfoOrError, containsInternalOrg } from '../common/copilotToken';
@@ -186,12 +186,14 @@ export abstract class BaseCopilotTokenManager extends Disposable implements ICop
 
 	//#region Private methods
 	private async fetchCopilotToken(githubToken: string) {
-		return await this._capiClientService.makeRequest<Response>({
+		const options: FetchOptions = {
 			headers: {
 				Authorization: `token ${githubToken}`,
 				'X-GitHub-Api-Version': '2025-04-01'
 			},
-		}, { type: RequestType.CopilotToken });
+			verifyJSONAndRetry: true,
+		};
+		return await this._capiClientService.makeRequest<Response>(options, { type: RequestType.CopilotToken });
 	}
 
 	private async fetchCopilotUserInfo(githubToken: string): Promise<CopilotUserInfo> {
@@ -225,7 +227,7 @@ export class FixedCopilotTokenManager extends BaseCopilotTokenManager implements
 		@IFetcherService fetcherService: IFetcherService,
 		@IEnvService envService: IEnvService
 	) {
-		super(new NullBaseOctoKitService(capiClientService, fetcherService), logService, telemetryService, domainService, capiClientService, fetcherService, envService);
+		super(new NullBaseOctoKitService(capiClientService, fetcherService, logService, telemetryService), logService, telemetryService, domainService, capiClientService, fetcherService, envService);
 		this.copilotToken = { token: _completionsToken, expires_at: 0, refresh_in: 0, username: 'fixedTokenManager', isVscodeTeamMember: false, copilot_plan: 'unknown' };
 	}
 
@@ -268,7 +270,7 @@ export class CopilotTokenManagerFromGitHubToken extends BaseCopilotTokenManager 
 		@IEnvService envService: IEnvService,
 		@IConfigurationService protected readonly configurationService: IConfigurationService
 	) {
-		super(new NullBaseOctoKitService(capiClientService, fetcherService), logService, telemetryService, domainService, capiClientService, fetcherService, envService);
+		super(new NullBaseOctoKitService(capiClientService, fetcherService, logService, telemetryService), logService, telemetryService, domainService, capiClientService, fetcherService, envService);
 	}
 
 	async getCopilotToken(force?: boolean): Promise<CopilotToken> {

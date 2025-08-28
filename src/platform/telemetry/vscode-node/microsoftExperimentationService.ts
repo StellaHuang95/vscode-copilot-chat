@@ -4,14 +4,16 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
-import { getExperimentationService, IExperimentationService, TargetPopulation } from 'vscode-tas-client';
-import { BrandedService } from '../../../util/vs/platform/instantiation/common/instantiation';
+import { getExperimentationService, IExperimentationFilterProvider, TargetPopulation } from 'vscode-tas-client';
+import { ICopilotTokenStore } from '../../authentication/common/copilotTokenStore';
 import { IEnvService } from '../../env/common/envService';
+import { packageJson } from '../../env/common/packagejson';
 import { IVSCodeExtensionContext } from '../../extContext/common/extensionContext';
+import { ILogService } from '../../log/common/logService';
 import { ITelemetryService } from '../common/telemetry';
+import { BaseExperimentationService, UserInfoStore } from '../node/baseExperimentationService';
 
 function getTargetPopulation(isPreRelease: boolean): TargetPopulation {
-
 	if (isPreRelease) {
 		return TargetPopulation.Insiders;
 	}
@@ -19,71 +21,52 @@ function getTargetPopulation(isPreRelease: boolean): TargetPopulation {
 	return TargetPopulation.Public;
 }
 
+class CopilotExtensionsFilterProvider implements IExperimentationFilterProvider {
+	constructor(private _logService: ILogService) { }
 
-export function createExperimentationService(
-	context: vscode.ExtensionContext,
-	experimentationTelemetry: ITelemetryService,
-	isPreRelease: boolean,
-): IExperimentationService & BrandedService {
-	const id = context.extension.id;
-	const version = context.extension.packageJSON['version'];
-	const targetPopulation = getTargetPopulation(isPreRelease);
+	getFilters(): Map<string, any> {
+		const copilotExtensionversion = vscode.extensions.getExtension('github.copilot')?.packageJSON.version;
+		const copilotChatExtensionVersion = packageJson.version;
+		const completionsCoreVersion = packageJson.completionsCoreVersion;
 
-
-	return getExperimentationService(
-		id,
-		version,
-		targetPopulation,
-		experimentationTelemetry,
-		context.globalState,
-	) as unknown as IExperimentationService & BrandedService;
+		this._logService.trace(`[CopilotExtensionsFilterProvider]::getFilters Copilot Extension Version: ${copilotExtensionversion}, Copilot Chat Extension Version: ${copilotChatExtensionVersion}, Completions Core Version: ${completionsCoreVersion}`);
+		const filters = new Map<string, any>();
+		filters.set('X-Copilot-RelatedPluginVersion-githubcopilot', copilotExtensionversion);
+		filters.set('X-Copilot-RelatedPluginVersion-githubcopilotchat', copilotChatExtensionVersion);
+		filters.set('X-VSCode-CompletionsInChatExtensionVersion', completionsCoreVersion);
+		return filters;
+	}
 }
 
-export class MicrosoftExperimentationService implements IExperimentationService, BrandedService {
+class GithubAccountFilterProvider implements IExperimentationFilterProvider {
+	constructor(private _userInfoStore: UserInfoStore, private _logService: ILogService) { }
 
-	declare _serviceBrand: undefined;
-	private readonly _delegate: IExperimentationService;
+	getFilters(): Map<string, any> {
+		this._logService.trace(`[GithubAccountFilterProvider]::getFilters SKU: ${this._userInfoStore.sku}, Internal Org: ${this._userInfoStore.internalOrg}`);
+		const filters = new Map<string, any>();
+		filters.set('X-GitHub-Copilot-SKU', this._userInfoStore.sku);
+		filters.set('X-Microsoft-Internal-Org', this._userInfoStore.internalOrg);
+		return filters;
+	}
 
+}
+
+export class MicrosoftExperimentationService extends BaseExperimentationService {
 	constructor(
 		@ITelemetryService telemetryService: ITelemetryService,
 		@IVSCodeExtensionContext context: IVSCodeExtensionContext,
 		@IEnvService envService: IEnvService,
+		@ICopilotTokenStore copilotTokenStore: ICopilotTokenStore,
+		@ILogService logService: ILogService
 	) {
+
 		const id = context.extension.id;
 		const version = context.extension.packageJSON['version'];
 		const targetPopulation = getTargetPopulation(envService.isPreRelease());
+		const delegateFn = (globalState: any, userInfoStore: UserInfoStore) => {
+			return getExperimentationService(id, version, targetPopulation, telemetryService, globalState, new GithubAccountFilterProvider(userInfoStore, logService), new CopilotExtensionsFilterProvider(logService));
+		};
 
-		this._delegate = getExperimentationService(
-			id,
-			version,
-			targetPopulation,
-			telemetryService,
-			context.globalState,
-		);
+		super(delegateFn, context, copilotTokenStore, logService);
 	}
-
-	get initializePromise(): Promise<void> {
-		return this._delegate.initializePromise;
-	}
-
-	get initialFetch(): Promise<void> {
-		return this._delegate.initialFetch;
-	}
-
-	isFlightEnabled(flight: string): boolean {
-		return this._delegate.isFlightEnabled(flight);
-	}
-	isCachedFlightEnabled(flight: string): Promise<boolean> {
-		return this._delegate.isCachedFlightEnabled(flight);
-	}
-	isFlightEnabledAsync(flight: string): Promise<boolean> {
-		return this._delegate.isFlightEnabledAsync(flight);
-	}
-	getTreatmentVariable<T extends boolean | number | string>(configId: string, name: string): T | undefined {
-		return this._delegate.getTreatmentVariable(configId, name);
-	}
-	getTreatmentVariableAsync<T extends boolean | number | string>(configId: string, name: string, checkCache?: boolean): Promise<T | undefined> {
-		return this._delegate.getTreatmentVariableAsync(configId, name, checkCache);
-	}
-
 }

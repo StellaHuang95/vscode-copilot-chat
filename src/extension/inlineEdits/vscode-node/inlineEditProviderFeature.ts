@@ -8,10 +8,12 @@ import { IAuthenticationService } from '../../../platform/authentication/common/
 import { ConfigKey, IConfigurationService } from '../../../platform/configuration/common/configurationService';
 import { IEnvService } from '../../../platform/env/common/envService';
 import { IVSCodeExtensionContext } from '../../../platform/extContext/common/extensionContext';
+import { InlineEditRequestLogContext } from '../../../platform/inlineEdits/common/inlineEditLogContext';
 import { ObservableGit } from '../../../platform/inlineEdits/common/observableGit';
 import { NesHistoryContextProvider } from '../../../platform/inlineEdits/common/workspaceEditTracker/nesHistoryContextProvider';
 import { ILogService } from '../../../platform/log/common/logService';
 import { IExperimentationService } from '../../../platform/telemetry/common/nullExperimentationService';
+import { isNotebookCell } from '../../../util/common/notebooks';
 import { createTracer } from '../../../util/common/tracing';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
 import { autorun, derived, derivedDisposable, observableFromEvent } from '../../../util/vs/base/common/observable';
@@ -21,7 +23,7 @@ import { IInstantiationService } from '../../../util/vs/platform/instantiation/c
 import { IExtensionContribution } from '../../common/contributions';
 import { CompletionsProvider } from '../../completions/vscode-node/completionsProvider';
 import { TelemetrySender } from '../node/nextEditProviderTelemetry';
-import { InlineEditDebugComponent } from './components/inlineEditDebugComponent';
+import { InlineEditDebugComponent, reportFeedbackCommandId } from './components/inlineEditDebugComponent';
 import { LogContextRecorder } from './components/logContextRecorder';
 import { DiagnosticsNextEditProvider } from './features/diagnosticsInlineEditProvider';
 import { InlineCompletionProviderImpl } from './inlineCompletionProvider';
@@ -72,7 +74,6 @@ export class InlineEditProviderFeature extends Disposable implements IExtensionC
 		@IEnvService private readonly _envService: IEnvService,
 		@ILogService private readonly _logService: ILogService,
 		@IInstantiationService private readonly _instantiationService: IInstantiationService,
-		@IVSCodeExtensionContext private readonly _extensionContext: IVSCodeExtensionContext
 	) {
 		super();
 
@@ -88,11 +89,11 @@ export class InlineEditProviderFeature extends Disposable implements IExtensionC
 			}
 
 			if (
-				this._expService.getTreatmentVariable<boolean>('vscode', 'copilotchat.enableNesInSettings') &&
-				this._extensionContext.globalState.get<boolean | undefined>(hasUpdatedNesSettingKey) !== true &&
+				this._expService.getTreatmentVariable<boolean>('copilotchat.enableNesInSettings') &&
+				this._vscodeExtensionContext.globalState.get<boolean | undefined>(hasUpdatedNesSettingKey) !== true &&
 				!copilotToken.isFreeUser
 			) {
-				this._extensionContext.globalState.update(hasUpdatedNesSettingKey, true);
+				this._vscodeExtensionContext.globalState.update(hasUpdatedNesSettingKey, true);
 				if (!this._configurationService.isConfigured(ConfigKey.InlineEditsEnabled)) {
 					this._configurationService.setConfig(ConfigKey.InlineEditsEnabled, true);
 				}
@@ -134,6 +135,7 @@ export class InlineEditProviderFeature extends Disposable implements IExtensionC
 				displayName: provider.displayName,
 				yieldTo: this._yieldToCopilot.read(reader) ? ['github.copilot'] : undefined,
 				debounceDelayMs: 0, // set 0 debounce to ensure consistent delays/timings
+				groupId: 'nes',
 			}));
 
 			if (TRIGGER_INLINE_EDIT_ON_ACTIVE_EDITOR_CHANGE) {
@@ -153,6 +155,23 @@ export class InlineEditProviderFeature extends Disposable implements IExtensionC
 			reader.store.add(commands.registerCommand(clearCacheCommandId, () => {
 				model.nextEditProvider.clearCache();
 			}));
+
+			reader.store.add(commands.registerCommand(reportNotebookNESIssueCommandId, () => {
+				const activeNotebook = window.activeNotebookEditor;
+				const document = window.activeTextEditor?.document;
+				if (!activeNotebook || !document || !isNotebookCell(document.uri)) {
+					return;
+				}
+				const doc = model.workspace.getDocumentByTextDocument(document);
+				const selection = activeNotebook.selection;
+				if (!selection || !doc) {
+					return;
+				}
+
+				const logContext = new InlineEditRequestLogContext(doc.id.uri, document.version, undefined);
+				logContext.recordingBookmark = model.debugRecorder.createBookmark();
+				void commands.executeCommand(reportFeedbackCommandId, { logContext });
+			}));
 		}));
 
 		constructorTracer.returns();
@@ -164,3 +183,4 @@ export const learnMoreCommandId = 'github.copilot.debug.inlineEdit.learnMore';
 export const learnMoreLink = 'https://aka.ms/vscode-nes';
 
 const clearCacheCommandId = 'github.copilot.debug.inlineEdit.clearCache';
+const reportNotebookNESIssueCommandId = 'github.copilot.debug.inlineEdit.reportNotebookNESIssue';

@@ -55,6 +55,7 @@ import { OctoKitService } from '../../github/common/octoKitServiceImpl';
 import { GithubRepositoryService } from '../../github/node/githubRepositoryService';
 import { IHeatmapService, nullHeatmapService } from '../../heatmap/common/heatmapService';
 import { IIgnoreService, NullIgnoreService } from '../../ignore/common/ignoreService';
+import { IImageService, nullImageService } from '../../image/common/imageService';
 import { IInteractiveSessionService } from '../../interactive/common/interactiveSessionService';
 import { ILanguageContextProviderService } from '../../languageContextProvider/common/languageContextProviderService';
 import { NullLanguageContextProviderService } from '../../languageContextProvider/common/nullLanguageContextProviderService';
@@ -86,7 +87,6 @@ import { IExperimentationService, NullExperimentationService } from '../../telem
 import { NullTelemetryService } from '../../telemetry/common/nullTelemetryService';
 import { ITelemetryService, ITelemetryUserConfig, TelemetryUserConfigImpl } from '../../telemetry/common/telemetry';
 import { ITerminalService, NullTerminalService } from '../../terminal/common/terminalService';
-import { IThinkingDataService, ThinkingDataImpl } from '../../thinking/node/thinkingDataService';
 import { ITokenizerProvider, TokenizerProvider } from '../../tokenizer/node/tokenizer';
 import { IWorkbenchService } from '../../workbench/common/workbenchService';
 import { IWorkspaceService } from '../../workspace/common/workspaceService';
@@ -97,7 +97,6 @@ import { SnapshotSearchService, TestingTabsAndEditorsService } from './simulatio
 import { TestChatAgentService } from './testChatAgentService';
 import { TestWorkbenchService } from './testWorkbenchService';
 import { TestWorkspaceService } from './testWorkspaceService';
-import { IImageService, nullImageService } from '../../image/common/imageService';
 
 /**
  * Collects descriptors for services to use in testing.
@@ -287,7 +286,6 @@ export function createPlatformServices(): TestingServiceCollection {
 	}));
 
 	testingServiceCollection.define(ITasksService, new SyncDescriptor(TestTasksService));
-	testingServiceCollection.define(IThinkingDataService, new SyncDescriptor(ThinkingDataImpl));
 
 	return testingServiceCollection;
 }

@@ -5,6 +5,7 @@
 
 import type { CancellationToken } from 'vscode';
 import { createServiceIdentifier } from '../../../util/common/services';
+import { TelemetryCorrelationId } from '../../../util/common/telemetryCorrelationId';
 
 /**
  * Fully qualified type of the embedding.
@@ -108,8 +109,9 @@ export interface IEmbeddingsComputer {
 		type: EmbeddingType,
 		inputs: readonly string[],
 		options?: ComputeEmbeddingsOptions,
+		telemetryInfo?: TelemetryCorrelationId,
 		token?: CancellationToken,
-	): Promise<Embeddings | undefined>;
+	): Promise<Embeddings>;
 }
 
 function dotProduct(a: EmbeddingVector, b: EmbeddingVector): number {

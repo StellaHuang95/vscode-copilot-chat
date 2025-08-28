@@ -52,7 +52,7 @@ export class VSCodeWorkspace extends ObservableWorkspace implements IDisposable 
 	private readonly _store = new DisposableStore();
 	private readonly _filter: DocumentFilter;
 	private get useAlternativeNotebookFormat(): boolean {
-		return this._configurationService.getExperimentBasedConfig(ConfigKey.Internal.UseAlternativeNESNotebookFormat, this._experimentationService);
+		return this._configurationService.getExperimentBasedConfig(ConfigKey.Internal.UseAlternativeNESNotebookFormat, this._experimentationService) || this._configurationService.getExperimentBasedConfig(ConfigKey.UseAlternativeNESNotebookFormat, this._experimentationService);
 	}
 	private readonly markdownNotebookCells = new Lazy<ResourceSet>(() => {
 		const markdownCellUris = new ResourceSet();
@@ -288,22 +288,14 @@ export class VSCodeWorkspace extends ObservableWorkspace implements IDisposable 
 	private getNotebookSelections(doc: NotebookDocument, activeCellEditor?: TextEditor) {
 		const altNotebook = this.getAltNotebookDocument(doc);
 		const visibleTextEditors = new Map(window.visibleTextEditors.map(e => [e.document, e]));
-		const cellTextEditors = coalesce(doc.getCells().map(cell => visibleTextEditors.has(cell.document) ? [cell, visibleTextEditors.get(cell.document)!] as const : undefined));
-		let selections = cellTextEditors.flatMap(e => altNotebook.toAltOffsetRange(e[0], e[1].selections));
-		// We can have multiple selections, so we return all of them.
-		// But the first selection is the most important one, as it represents the cursor position.
 		// As notebooks have multiple cells, and each cell can have its own selection,
 		// We should focus on the active cell to determine the cursor position.
 		const selectedCellRange = window.activeNotebookEditor?.selection;
 		const selectedCell = activeCellEditor ? altNotebook.getCell(activeCellEditor.document) : (selectedCellRange && selectedCellRange.start < doc.cellCount ? doc.cellAt(selectedCellRange.start) : undefined);
 		const selectedCellEditor = selectedCell ? visibleTextEditors.get(selectedCell.document) : undefined;
-		if (selectedCellEditor && selectedCell) {
-			const primarySelections = altNotebook.toAltOffsetRange(selectedCell, selectedCellEditor.selections);
-			// Remove the selections related to active cell from the list of selections and add it to the front.
-			selections = selections.filter(s => !primarySelections.some(ps => ps.equals(s)));
-			selections.splice(0, 0, ...primarySelections);
-		}
-		return selections;
+		// We only care about the active cell where cursor is, don't care about multi-cursor.
+		// As the edits are to be performed around wher the cursor is.
+		return (selectedCellEditor && selectedCell) ? altNotebook.toAltOffsetRange(selectedCell, selectedCellEditor.selections) : [];
 	}
 
 	private getNotebookVisibleRanges(doc: NotebookDocument) {
@@ -507,10 +499,15 @@ class VSCodeObservableTextDocument extends AbstractVSCodeObservableDocument impl
 		if (!offsetRange) {
 			throw new Error('OffsetRange is not defined.');
 		}
-		return new Range(
+		const result = new Range(
 			textDocument.positionAt(offsetRange.start),
 			textDocument.positionAt(offsetRange.endExclusive)
 		);
+		if (arg1 instanceof OffsetRange) {
+			return [[this.textDocument, result]];
+		} else {
+			return result;
+		}
 	}
 	toOffsetRange(textDocument: TextDocument, range: Range): OffsetRange | undefined {
 		return new OffsetRange(textDocument.offsetAt(range.start), textDocument.offsetAt(range.end));
@@ -521,8 +518,11 @@ class VSCodeObservableTextDocument extends AbstractVSCodeObservableDocument impl
 
 	fromRange(arg1: TextDocument | Range, range?: Range): Range | undefined | [TextDocument, Range][] {
 		if (arg1 instanceof Range) {
-			return range;
+			return [[this.textDocument, arg1]];
 		} else if (range !== undefined) {
+			if (arg1 !== this.textDocument) {
+				throw new Error('TextDocument does not match the one of this observable document.');
+			}
 			return range;
 		} else {
 			return undefined;

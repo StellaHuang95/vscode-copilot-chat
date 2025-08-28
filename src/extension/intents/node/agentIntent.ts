@@ -10,7 +10,7 @@ import { BudgetExceededError } from '@vscode/prompt-tsx/dist/base/materialized';
 import type * as vscode from 'vscode';
 import { ChatLocation, ChatResponse } from '../../../platform/chat/common/commonTypes';
 import { ConfigKey, IConfigurationService } from '../../../platform/configuration/common/configurationService';
-import { modelCanUseReplaceStringExclusively, modelSupportsApplyPatch, modelSupportsReplaceString } from '../../../platform/endpoint/common/chatModelCapabilities';
+import { isHiddenModelB, modelCanUseApplyPatchExclusively, modelCanUseReplaceStringExclusively, modelSupportsApplyPatch, modelSupportsMultiReplaceString, modelSupportsReplaceString } from '../../../platform/endpoint/common/chatModelCapabilities';
 import { IEndpointProvider } from '../../../platform/endpoint/common/endpointProvider';
 import { IEnvService } from '../../../platform/env/common/envService';
 import { ILogService } from '../../../platform/log/common/logService';
@@ -41,7 +41,7 @@ import { ICodeMapperService } from '../../prompts/node/codeMapper/codeMapperServ
 import { TemporalContextStats } from '../../prompts/node/inline/temporalContext';
 import { EditCodePrompt2 } from '../../prompts/node/panel/editCodePrompt2';
 import { ToolResultMetadata } from '../../prompts/node/panel/toolCalling';
-import { ToolName } from '../../tools/common/toolNames';
+import { ContributedToolName, ToolName } from '../../tools/common/toolNames';
 import { IToolsService } from '../../tools/common/toolsService';
 import { VirtualTool } from '../../tools/common/virtualTools/virtualTool';
 import { IToolGroupingService } from '../../tools/common/virtualTools/virtualToolTypes';
@@ -64,19 +64,47 @@ const getTools = (instaService: IInstantiationService, request: vscode.ChatReque
 		allowTools[ToolName.ReplaceString] = modelSupportsReplaceString(model);
 		allowTools[ToolName.ApplyPatch] = await modelSupportsApplyPatch(model) && !!toolsService.getTool(ToolName.ApplyPatch);
 
+		if (allowTools[ToolName.ApplyPatch] && modelCanUseApplyPatchExclusively(model) && configurationService.getExperimentBasedConfig(ConfigKey.Internal.Gpt5ApplyPatchExclusively, experimentationService)) {
+			allowTools[ToolName.EditFile] = false;
+		}
+
+		if (await isHiddenModelB(model)) {
+			const treatment = experimentationService.getTreatmentVariable<string>('copilotchat.hiddenModelBEditTool');
+			switch (treatment) {
+				case 'with_replace_string':
+					allowTools[ToolName.ReplaceString] = true;
+					allowTools[ToolName.EditFile] = true;
+					break;
+				case 'only_replace_string':
+					allowTools[ToolName.ReplaceString] = true;
+					allowTools[ToolName.EditFile] = false;
+					break;
+				case 'control':
+				default:
+					allowTools[ToolName.ReplaceString] = false;
+					allowTools[ToolName.EditFile] = true;
+			}
+		}
+
 		if (modelCanUseReplaceStringExclusively(model)) {
 			allowTools[ToolName.ReplaceString] = true;
 			allowTools[ToolName.EditFile] = false;
 		}
 
 		if (allowTools[ToolName.ReplaceString]) {
-			if (configurationService.getExperimentBasedConfig(ConfigKey.Internal.MultiReplaceString, experimentationService)) {
+			if (modelSupportsMultiReplaceString(model) && configurationService.getExperimentBasedConfig(ConfigKey.Internal.MultiReplaceString, experimentationService)) {
 				allowTools[ToolName.MultiReplaceString] = true;
 			}
 		}
 
 		allowTools[ToolName.RunTests] = await testService.hasAnyTests();
-		allowTools[ToolName.CoreRunTask] = !!(configurationService.getConfig(ConfigKey.AgentCanRunTasks) && tasksService.getTasks().length);
+		allowTools[ToolName.CoreRunTask] = tasksService.getTasks().length > 0;
+
+		if (request.tools.get(ContributedToolName.EditFilesPlaceholder) === false) {
+			allowTools[ToolName.ApplyPatch] = false;
+			allowTools[ToolName.EditFile] = false;
+			allowTools[ToolName.ReplaceString] = false;
+		}
 
 		return toolsService.getEnabledTools(request, tool => {
 			if (typeof allowTools[tool.name] === 'boolean') {

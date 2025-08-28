@@ -144,7 +144,9 @@ export class ChatMLFetcherImpl extends AbstractChatMLFetcher {
 			ourRequestId,
 			location: opts.location,
 			postOptions,
+			body: requestBody,
 			tools: requestBody.tools,
+			ignoreStatefulMarker: opts.ignoreStatefulMarker
 		});
 		let tokenCount = -1;
 		try {
@@ -253,6 +255,7 @@ export class ChatMLFetcherImpl extends AbstractChatMLFetcher {
 						source: telemetryProperties.messageSource ?? 'unknown',
 						requestId: ourRequestId,
 						model: chatEndpoint.model,
+						apiType: chatEndpoint.apiType,
 						...(telemetryProperties.retryAfterFilterCategory ? { retryAfterFilterCategory: telemetryProperties.retryAfterFilterCategory } : {}),
 					}, {
 						totalTokenMax: chatEndpoint.modelMaxPromptTokens ?? -1,
@@ -280,6 +283,7 @@ export class ChatMLFetcherImpl extends AbstractChatMLFetcher {
 					source: telemetryProperties.messageSource ?? 'unknown',
 					requestId: ourRequestId,
 					model: chatEndpoint.model,
+					apiType: chatEndpoint.apiType
 				}, {
 					totalTokenMax: chatEndpoint.modelMaxPromptTokens ?? -1,
 					promptTokenCount: tokenCount,
@@ -302,10 +306,12 @@ export class ChatMLFetcherImpl extends AbstractChatMLFetcher {
 			source,
 			requestId,
 			model,
+			apiType
 		}: {
 			source: string;
 			requestId: string;
 			model: string;
+			apiType: string | undefined;
 		},
 		{
 			totalTokenMax,
@@ -330,6 +336,7 @@ export class ChatMLFetcherImpl extends AbstractChatMLFetcher {
 				"owner": "digitarald",
 				"comment": "Report canceled service responses for quality.",
 				"model": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "Model selection for the response" },
+				"apiType": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "API type for the response- chat completions or responses" },
 				"source": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "Source for why the request was made" },
 				"requestId": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "Id of the request" },
 				"totalTokenMax": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "Maximum total token window", "isMeasurement": true },
@@ -343,6 +350,7 @@ export class ChatMLFetcherImpl extends AbstractChatMLFetcher {
 			}
 		*/
 		this._telemetryService.sendTelemetryEvent('response.cancelled', { github: true, microsoft: true }, {
+			apiType,
 			source,
 			requestId,
 			model,
@@ -374,6 +382,7 @@ export class ChatMLFetcherImpl extends AbstractChatMLFetcher {
 				"type": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "Type of issue" },
 				"reason": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "Reason of issue" },
 				"model": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "Model selection for the response" },
+				"apiType": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "API type for the response- chat completions or responses" },
 				"source": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "Source for why the request was made" },
 				"requestId": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "Id of the request" },
 				"totalTokenMax": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "Maximum total token window", "isMeasurement": true },
@@ -391,6 +400,7 @@ export class ChatMLFetcherImpl extends AbstractChatMLFetcher {
 			source: telemetryProperties?.messageSource ?? 'unknown',
 			requestId: ourRequestId,
 			model: chatEndpointInfo.model,
+			apiType: chatEndpointInfo.apiType,
 			...(telemetryProperties?.retryAfterFilterCategory ? { retryAfterFilterCategory: telemetryProperties.retryAfterFilterCategory } : {})
 		}, {
 			totalTokenMax: chatEndpointInfo.modelMaxPromptTokens ?? -1,
@@ -426,6 +436,7 @@ export class ChatMLFetcherImpl extends AbstractChatMLFetcher {
 					"source": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "Source of the initial request" },
 					"initiatorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "Whether the request was initiated by a user or an agent" },
 					"model": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "Model selection for the response" },
+					"apiType": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "API type for the response- chat completions or responses" },
 					"requestId": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "Id of the current turn request" },
 					"totalTokenMax": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "Maximum total token window", "isMeasurement": true },
 					"clientPromptTokenCount": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "Number of prompt tokens, locally counted", "isMeasurement": true },
@@ -449,6 +460,7 @@ export class ChatMLFetcherImpl extends AbstractChatMLFetcher {
 				source: baseTelemetry?.properties.messageSource ?? 'unknown',
 				initiatorType: userInitiatedRequest ? 'user' : 'agent',
 				model: chatEndpointInfo?.model,
+				apiType: chatEndpointInfo?.apiType,
 				requestId,
 				...(baseTelemetry?.properties.retryAfterFilterCategory ? { retryAfterFilterCategory: baseTelemetry.properties.retryAfterFilterCategory } : {}),
 			}, {

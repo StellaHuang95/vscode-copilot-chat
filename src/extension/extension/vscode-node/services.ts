@@ -61,7 +61,6 @@ import { TelemetryService } from '../../../platform/telemetry/vscode-node/teleme
 import { IWorkspaceMutationManager } from '../../../platform/testing/common/workspaceMutationManager';
 import { ISetupTestsDetector, SetupTestsDetector } from '../../../platform/testing/node/setupTestDetector';
 import { ITestDepsResolver, TestDepsResolver } from '../../../platform/testing/node/testDepsResolver';
-import { IThinkingDataService, ThinkingDataImpl } from '../../../platform/thinking/node/thinkingDataService';
 import { ITokenizerProvider, TokenizerProvider } from '../../../platform/tokenizer/node/tokenizer';
 import { IWorkspaceChunkSearchService, WorkspaceChunkSearchService } from '../../../platform/workspaceChunkSearch/node/workspaceChunkSearchService';
 import { IWorkspaceFileIndex, WorkspaceFileIndex } from '../../../platform/workspaceChunkSearch/node/workspaceFileIndex';
@@ -86,6 +85,7 @@ import { ILanguageToolsProvider, LanguageToolsProvider } from '../../onboardDebu
 import { ChatMLFetcherImpl } from '../../prompt/node/chatMLFetcher';
 import { IFeedbackReporter } from '../../prompt/node/feedbackReporter';
 import { IPromptVariablesService } from '../../prompt/node/promptVariablesService';
+import { ITodoListContextProvider, TodoListContextProvider } from '../../prompt/node/todoListContextProvider';
 import { DevContainerConfigurationServiceImpl } from '../../prompt/vscode-node/devContainerConfigurationServiceImpl';
 import { ProductionEndpointProvider } from '../../prompt/vscode-node/endpointProviderImpl';
 import { GitCommitMessageServiceImpl } from '../../prompt/vscode-node/gitCommitMessageServiceImpl';
@@ -131,7 +131,7 @@ export function registerServices(builder: IInstantiationServiceBuilder, extensio
 	const internalAIKey = extensionContext.extension.packageJSON.internalAIKey ?? '';
 	const internalLargeEventAIKey = extensionContext.extension.packageJSON.internalLargeStorageAriaKey ?? '';
 	const ariaKey = extensionContext.extension.packageJSON.ariaKey ?? '';
-	if (isTestMode) {
+	if (isTestMode || isScenarioAutomation) {
 		setupTelemetry(builder, extensionContext, internalAIKey, internalLargeEventAIKey, ariaKey);
 		// If we're in testing mode, then most code will be called from an actual test,
 		// and not from here. However, some objects will capture the `accessor` we pass
@@ -146,8 +146,7 @@ export function registerServices(builder: IInstantiationServiceBuilder, extensio
 
 	if (isScenarioAutomation) {
 		builder.define(IAuthenticationService, new SyncDescriptor(StaticGitHubAuthenticationService, [getStaticGitHubToken]));
-	}
-	else {
+	} else {
 		builder.define(IAuthenticationService, new SyncDescriptor(AuthenticationService));
 	}
 
@@ -193,11 +192,11 @@ export function registerServices(builder: IInstantiationServiceBuilder, extensio
 	builder.define(ILanguageContextProviderService, new SyncDescriptor(LanguageContextProviderService));
 	builder.define(IWorkspaceListenerService, new SyncDescriptor(WorkspacListenerService));
 	builder.define(ICodeSearchAuthenticationService, new SyncDescriptor(VsCodeCodeSearchAuthenticationService));
-	builder.define(IThinkingDataService, new SyncDescriptor(ThinkingDataImpl));
+	builder.define(ITodoListContextProvider, new SyncDescriptor(TodoListContextProvider));
 }
 
 function setupMSFTExperimentationService(builder: IInstantiationServiceBuilder, extensionContext: ExtensionContext) {
-	if (ExtensionMode.Production === extensionContext.extensionMode) {
+	if (ExtensionMode.Production === extensionContext.extensionMode && !isScenarioAutomation) {
 		// Intitiate the experimentation service
 		builder.define(IExperimentationService, new SyncDescriptor(MicrosoftExperimentationService));
 	} else {
@@ -207,7 +206,7 @@ function setupMSFTExperimentationService(builder: IInstantiationServiceBuilder, 
 
 function setupTelemetry(builder: IInstantiationServiceBuilder, extensionContext: ExtensionContext, internalAIKey: string, internalLargeEventAIKey: string, externalAIKey: string) {
 
-	if (ExtensionMode.Production === extensionContext.extensionMode) {
+	if (ExtensionMode.Production === extensionContext.extensionMode && !isScenarioAutomation) {
 		builder.define(ITelemetryService, new SyncDescriptor(TelemetryService, [
 			extensionContext.extension.packageJSON.name,
 			internalAIKey,
