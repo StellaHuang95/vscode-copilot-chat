@@ -12,6 +12,7 @@ import path from 'path';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { SimpleRPC } from '../src/extension/onboardDebug/node/copilotDebugWorker/rpc';
 import { deserializeWorkbenchState } from '../src/platform/test/node/promptContextModel';
+import { waitForListenerOnPort } from '../src/util/node/ports';
 import { createCancelablePromise, DeferredPromise, disposableTimeout, raceCancellablePromises, retry, timeout } from '../src/util/vs/base/common/async';
 import { Emitter, Event } from '../src/util/vs/base/common/event';
 import { Iterable } from '../src/util/vs/base/common/iterator';
@@ -19,14 +20,13 @@ import { Disposable, DisposableStore, toDisposable } from '../src/util/vs/base/c
 import { extUriBiasedIgnorePathCase } from '../src/util/vs/base/common/resources';
 import { URI } from '../src/util/vs/base/common/uri';
 import { generateUuid } from '../src/util/vs/base/common/uuid';
+import { findFreePortFaster } from '../src/util/vs/base/node/ports';
 import { ProxiedSimulationEndpointHealth } from './base/simulationEndpointHealth';
 import { ProxiedSimulationOutcome } from './base/simulationOutcome';
 import { SimulationTest } from './base/stest';
 import { ProxiedSONOutputPrinter } from './jsonOutputPrinter';
 import { logger } from './simulationLogger';
 import { ITestRunResult, SimulationTestContext } from './testExecutor';
-import { findFreePortFaster } from '../src/util/vs/base/node/ports';
-import { waitForListenerOnPort } from '../src/util/node/ports';
 
 const MAX_CONCURRENT_SESSIONS = 10;
 const HOST = '127.0.0.1';
@@ -74,11 +74,19 @@ export class TestExecutionInExtension {
 		store.add(toDisposable(() => controlServer.close()));
 
 		const vsixFile = await TestExecutionInExtension._packExtension();
+
+		// This is for testing purposes only to install custom Pylance vsix that has MCP apis.
+		// To use it, uncomment the line below and move the vsix to test/simulationExtension directory
+		// and commit the changes.
+		// const pylanceVsixPath = await TestExecutionInExtension._getPylanceVsixPath();
 		const child = spawn(serverBinary, [
 			'--server-data-dir', path.resolve(__dirname, '../.vscode-test/server-data'),
 			'--extensions-dir', path.resolve(__dirname, '../.vscode-test/server-extensions'),
 			...ctx.opts.installExtensions.flatMap(ext => ['--install-extension', ext]),
 			'--install-extension', vsixFile,
+			'--install-extension', 'ms-python.python',
+			// '--install-extension', pylanceVsixPath,
+			'--install-extension', 'ms-python.vscode-pylance@2025.7.102',
 			'--force',
 			'--accept-server-license-terms',
 			'--connection-token', connectionToken,
@@ -130,11 +138,23 @@ export class TestExecutionInExtension {
 		return inst;
 	}
 
+	private static async _getPylanceVsixPath() {
+		logger.info('Finding Pylance...');
+		const pylancePath = path.resolve(__dirname, '..', 'test', 'simulationExtension');
+		const vsixPath = path.join(pylancePath, 'vscode-pylance-9999.0.0-dev.vsix');
+		logger.info(`Pylance VSIX path: ${vsixPath}`);
+		return vsixPath;
+	}
+
 	private static async _packExtension() {
 		const packageJsonPath = path.resolve(__dirname, '..', 'package.json');
 
 		const extensionDir = path.resolve(__dirname, '..', 'test', 'simulationExtension');
-		const existingVsix = (await fs.readdir(extensionDir)).map(e => path.join(extensionDir, e)).find(f => f.endsWith('.vsix'));
+		// Modify this line to exclude Pylance VSIX files
+		const existingVsix = (await fs.readdir(extensionDir))
+			.map(e => path.join(extensionDir, e))
+			.find(f => f.endsWith('.vsix') && !f.includes('pylance'));
+
 		if (existingVsix) {
 			const vsixMtime = await fs.stat(existingVsix).then(s => s.mtimeMs);
 			const packageJsonMtime = await fs.stat(packageJsonPath).then(s => s.mtimeMs);
