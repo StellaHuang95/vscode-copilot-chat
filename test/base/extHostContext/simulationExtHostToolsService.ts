@@ -76,6 +76,7 @@ export class SimulationExtHostToolsService extends BaseToolsService implements I
 		const start = Date.now();
 		let err: Error | undefined;
 		try {
+			// Handle internal Copilot tools with existing logic
 			const toolName = getToolName(name) as ToolName;
 			const tool = this._overrides.get(toolName)?.tool;
 			if (tool) {
@@ -88,6 +89,26 @@ export class SimulationExtHostToolsService extends BaseToolsService implements I
 				return result;
 			}
 
+			// Handle Pylance MCP tools by delegating to VS Code
+			if (name.startsWith('mcp_pylance')) {
+				logger.debug(`Delegating MCP tool ${name} to VS Code native invocation`);
+				try {
+					// Import vscode and use native tool invocation
+					const vscode = require('vscode');
+					const result = await raceTimeout(
+						Promise.resolve(vscode.lm.invokeTool(name, options, token)),
+						60_000
+					);
+					if (!result) {
+						throw new Error(`MCP tool call timed out after 60 seconds`);
+					}
+					return result;
+				} catch (mcpError) {
+					throw new Error(`Failed to invoke MCP tool ${name}: ${mcpError.message}`);
+				}
+			}
+
+			// Fallback to inner tools service for other tools
 			const r = await raceTimeout(Promise.resolve(this._inner.invokeTool(name, options, token)), 60_000);
 			if (!r) {
 				throw new Error(`Tool call timed out after 60 seconds`);
@@ -121,6 +142,7 @@ export class SimulationExtHostToolsService extends BaseToolsService implements I
 	}
 
 	getEnabledTools(request: ChatRequest, filter?: (tool: LanguageModelToolInformation) => boolean | undefined): LanguageModelToolInformation[] {
+		// logger.debug('Available tools:', this.tools.map(t => t.name));
 		const packageJsonTools = getPackagejsonToolsForTest();
 		return this.tools.filter(tool => filter?.(tool) ?? (!this._disabledTools.has(getToolName(tool.name)) && packageJsonTools.has(tool.name)));
 	}
